@@ -1,0 +1,32 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "2dd03d84dd37277a6bc3dd983533c60f"
+name = "Wholsale Page"
+application_url = "https://renewal-flour-brings-bride.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-10"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,write_content,write_online_store_navigation,write_customers,read_customers,write_companies,read_companies"
+
+[app_proxy]
+url = "https://hypothetical-dryer-kay-adaptor.trycloudflare.com/apps/proxy"
+subpath = "proxy"
+prefix = "apps"
+
+[auth]
+redirect_urls = [ "https://renewal-flour-brings-bride.trycloudflare.com/api/auth" ]
