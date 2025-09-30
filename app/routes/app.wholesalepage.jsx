@@ -130,6 +130,42 @@ export const loader = async ({ request }) => {
         <div id="userEmail-error" class="error-message"></div>
       </div>
 
+      <div style="margin-bottom: 16px;">
+        <label>Address Line 1 *</label>
+        <input type="text" name="address1" id="address1" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required maxlength="191" />
+        <div id="address1-error" class="error-message"></div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label>Address Line 2</label>
+        <input type="text" name="address2" id="address2" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" maxlength="191" />
+        <div id="address2-error" class="error-message"></div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label>Country</label>
+        <input type="text" name="country" id="country" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" maxlength="191" />
+        <div id="country-error" class="error-message"></div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label>State</label>
+        <input type="text" name="state" id="state" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" maxlength="191" />
+        <div id="state-error" class="error-message"></div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label>City</label>
+        <input type="text" name="city" id="city" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" maxlength="191" />
+        <div id="city-error" class="error-message"></div>
+      </div>
+
+      <div style="margin-bottom: 16px;">
+        <label>ZIP Code</label>
+        <input type="text" name="zip_code" id="zip_code" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" maxlength="191" />
+        <div id="zip_code-error" class="error-message"></div>
+      </div>
+
       <button type="submit" id="submitBtn" class="submit-btn">
         Submit
       </button>
@@ -426,6 +462,63 @@ export const loader = async ({ request }) => {
                       userEmail.classList.add('success');
                     }
                     
+                    // Address1 validation (required)
+                    const address1 = document.getElementById('address1');
+                    if (!address1.value.trim()) {
+                      showError('address1', 'Address Line 1 is required');
+                      isValid = false;
+                    } else if (address1.value.trim().length > 191) {
+                      showError('address1', 'Address Line 1 must not exceed 191 characters');
+                      isValid = false;
+                    } else {
+                      address1.classList.add('success');
+                    }
+                    
+                    // Address2 validation (optional)
+                    const address2 = document.getElementById('address2');
+                    if (address2.value.trim() && address2.value.trim().length > 191) {
+                      showError('address2', 'Address Line 2 must not exceed 191 characters');
+                      isValid = false;
+                    } else if (address2.value.trim()) {
+                      address2.classList.add('success');
+                    }
+                    
+                    // Country validation (optional)
+                    const country = document.getElementById('country');
+                    if (country.value.trim() && country.value.trim().length > 191) {
+                      showError('country', 'Country must not exceed 191 characters');
+                      isValid = false;
+                    } else if (country.value.trim()) {
+                      country.classList.add('success');
+                    }
+                    
+                    // State validation (optional)
+                    const state = document.getElementById('state');
+                    if (state.value.trim() && state.value.trim().length > 191) {
+                      showError('state', 'State must not exceed 191 characters');
+                      isValid = false;
+                    } else if (state.value.trim()) {
+                      state.classList.add('success');
+                    }
+                    
+                    // City validation (optional)
+                    const city = document.getElementById('city');
+                    if (city.value.trim() && city.value.trim().length > 191) {
+                      showError('city', 'City must not exceed 191 characters');
+                      isValid = false;
+                    } else if (city.value.trim()) {
+                      city.classList.add('success');
+                    }
+                    
+                    // ZIP Code validation (optional)
+                    const zipCode = document.getElementById('zip_code');
+                    if (zipCode.value.trim() && zipCode.value.trim().length > 191) {
+                      showError('zip_code', 'ZIP Code must not exceed 191 characters');
+                      isValid = false;
+                    } else if (zipCode.value.trim()) {
+                      zipCode.classList.add('success');
+                    }
+                    
                     return isValid;
                   }
                   
@@ -507,6 +600,26 @@ export const loader = async ({ request }) => {
                           showError(fieldId, 'Please enter a valid email address');
                         } else if (field.value.trim() && field.value.trim().length > 100) {
                           showError(fieldId, 'Email must not exceed 100 characters');
+                        } else if (field.value.trim()) {
+                          field.classList.add('success');
+                        }
+                        break;
+                        
+                      case 'address1':
+                        if (field.value.trim() && field.value.trim().length > 191) {
+                          showError(fieldId, 'Address Line 1 must not exceed 191 characters');
+                        } else if (field.value.trim()) {
+                          field.classList.add('success');
+                        }
+                        break;
+                        
+                      case 'address2':
+                      case 'country':
+                      case 'state':
+                      case 'city':
+                      case 'zip_code':
+                        if (field.value.trim() && field.value.trim().length > 191) {
+                          showError(fieldId, 'Field must not exceed 191 characters');
                         } else if (field.value.trim()) {
                           field.classList.add('success');
                         }

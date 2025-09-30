@@ -1,0 +1,24 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "e80d8a43e7d5068744e0f0fe41ed9dc0"
+name = "Quick + Wholesale "
+application_url = "https://memorabilia-crop-harbour-planes.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-10"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_companies,read_customers,read_orders,read_products,read_script_tags,read_themes,unauthenticated_read_product_listings,write_companies,write_content,write_customers,write_discounts,write_online_store_navigation,write_orders,write_products,write_script_tags,write_themes"
+
+[auth]
+redirect_urls = [ "https://memorabilia-crop-harbour-planes.trycloudflare.com/api/auth" ]
+
+[app_proxy]
+url = "https://memorabilia-crop-harbour-planes.trycloudflare.com/apps/proxy"
+subpath = "proxy"
+prefix = "apps"

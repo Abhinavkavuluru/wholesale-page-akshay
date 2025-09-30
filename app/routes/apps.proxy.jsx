@@ -119,6 +119,15 @@ export const action = async ({ request }) => {
     }
 
     const userEmail = formData.get("userEmail");
+    const phoneNumber = formData.get("phone");
+
+    // Debug: Log all form data including phone
+    console.log("=== FORM DATA DEBUG ===");
+    console.log("Phone number from form:", phoneNumber);
+    console.log("Phone number type:", typeof phoneNumber);
+    console.log("Phone number length:", phoneNumber ? phoneNumber.length : 'null/undefined');
+    console.log("Phone number trimmed:", phoneNumber ? phoneNumber.trim() : 'null/undefined');
+    console.log("======================");
 
     // First, check if customer with this email already exists
     console.log("Checking if customer exists with email:", userEmail);
@@ -126,18 +135,19 @@ export const action = async ({ request }) => {
     const customerCheckResponse = await admin.graphql(
       `#graphql
         query GetCustomerByEmail($query: String!) {
-          customers(first: 1, query: $query) {
+          customers(first: 5, query: $query) {
             edges {
               node {
                 id
                 email
                 firstName
                 lastName
+                phone
               }
             }
           }
         }`,
-      { variables: { query: `email:${userEmail}` } }
+      { variables: { query: `email:"${userEmail.toLowerCase().trim()}"` } }
     );
 
     const customerCheckJson = await customerCheckResponse.json();
@@ -148,11 +158,27 @@ export const action = async ({ request }) => {
       console.log("Email has been present - Customer ID:", existingCustomer.id);
       console.log("Existing customer details:", existingCustomer);
       
-      // Update existing customer's first name and last name
+      // Update existing customer's first name, last name, and phone number
       const formFirstName = formData.get("firstName");
       const formLastName = formData.get("lastName");
+      const formPhone = formData.get("phone");
       
-      console.log("Updating customer with form data:", { firstName: formFirstName, lastName: formLastName });
+      console.log("Updating customer with form data:", { firstName: formFirstName, lastName: formLastName, phone: formPhone });
+      
+      // Prepare customer input - only include phone if it has a value
+      const customerInput = {
+        id: existingCustomer.id,
+        firstName: formFirstName,
+        lastName: formLastName
+      };
+      
+      // Only add phone if it's not empty
+      if (formPhone && formPhone.trim()) {
+        customerInput.phone = formPhone.trim();
+        console.log("Adding phone to customer update:", formPhone.trim());
+      } else {
+        console.log("Phone is empty, not including in update");
+      }
       
       const customerUpdateResponse = await admin.graphql(
         `#graphql
@@ -163,6 +189,7 @@ export const action = async ({ request }) => {
                 email
                 firstName
                 lastName
+                phone
               }
               userErrors {
                 field
@@ -172,11 +199,7 @@ export const action = async ({ request }) => {
           }`,
         {
           variables: {
-            input: {
-              id: existingCustomer.id,
-              firstName: formFirstName,
-              lastName: formLastName
-            }
+            input: customerInput
           }
         }
       );
@@ -255,6 +278,225 @@ export const action = async ({ request }) => {
     const companyId = companyJson.data?.companyCreate?.company?.id;
     console.log("Created company ID:", companyId);
 
+    // 1.5. Add shipping address to the company if companyId exists
+    if (companyId) {
+      const address1 = formData.get("address1");
+      const address2 = formData.get("address2");
+      const city = formData.get("city");
+      const state = formData.get("state");
+      const country = formData.get("country");
+      const zipCode = formData.get("zip_code");
+      
+      // Only create address if at least address1 is provided
+      if (address1 && address1.trim()) {
+        console.log("Adding shipping address to company:", {
+          address1,
+          address2,
+          city,
+          state,
+          country,
+          zipCode
+        });
+        
+        const addressInput = {
+          companyId: companyId,
+          address: {
+            address1: address1.trim(),
+            city: city?.trim() || "",
+            countryCode: (country || "IN").trim(),
+            zoneCode: (state || "").trim(),
+            zip: zipCode?.trim() || ""
+          }
+        };
+        
+        // Add address2 if provided
+        if (address2 && address2.trim()) {
+          addressInput.address.address2 = address2.trim();
+        }
+        
+        try {
+          // First, get the company's default location
+          const companyLocationResponse = await admin.graphql(
+            `#graphql
+              query GetCompanyLocations($companyId: ID!) {
+                company(id: $companyId) {
+                  locations(first: 1) {
+                    edges {
+                      node {
+                        id
+                        name
+                      }
+                    }
+                  }
+                }
+              }`,
+            { variables: { companyId: companyId } }
+          );
+          
+          const companyLocationJson = await companyLocationResponse.json();
+          console.log("Company location response:", JSON.stringify(companyLocationJson, null, 2));
+          
+          const locationId = companyLocationJson.data?.company?.locations?.edges?.[0]?.node?.id;
+          
+          if (locationId) {
+            console.log("Found company location ID:", locationId);
+            
+            // Update location name if provided in form
+            const locationNameFromForm = (formData.get("location") || "").trim();
+            if (locationNameFromForm) {
+              console.log("Updating location name to:", locationNameFromForm);
+              
+              const updateLocationResponse = await admin.graphql(
+                `#graphql
+                  mutation UpdateCompanyLocationName($companyLocationId: ID!, $input: CompanyLocationUpdateInput!) {
+                    companyLocationUpdate(companyLocationId: $companyLocationId, input: $input) {
+                      companyLocation { 
+                        id 
+                        name 
+                      }
+                      userErrors { 
+                        field 
+                        message 
+                      }
+                    }
+                  }`,
+                {
+                  variables: {
+                    companyLocationId: locationId,
+                    input: { name: locationNameFromForm }
+                  }
+                }
+              );
+              
+              const updateLocationJson = await updateLocationResponse.json();
+              console.log("Location name update response:", JSON.stringify(updateLocationJson, null, 2));
+              
+              if (updateLocationJson?.data?.companyLocationUpdate?.userErrors?.length > 0) {
+                console.error("Location name update errors:", updateLocationJson.data.companyLocationUpdate.userErrors);
+              } else {
+                console.log("Location renamed successfully to:", updateLocationJson?.data?.companyLocationUpdate?.companyLocation?.name);
+              }
+            }
+            
+            // Now assign the address to the company location
+            const addressResponse = await admin.graphql(
+              `#graphql
+                mutation CompanyLocationAssignAddress($locationId: ID!, $address: CompanyAddressInput!, $addressTypes: [CompanyAddressType!]!) {
+                  companyLocationAssignAddress(
+                    locationId: $locationId
+                    address: $address
+                    addressTypes: $addressTypes
+                  ) {
+                    addresses {
+                      id
+                      address1
+                      address2
+                      city
+                      province
+                      country
+                      zip
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }`,
+              { 
+                variables: { 
+                  locationId: locationId,
+                  address: addressInput.address,
+                  addressTypes: ["SHIPPING"]
+                } 
+              }
+            );
+            
+            const addressJson = await addressResponse.json();
+            console.log("Company address assignment response:", JSON.stringify(addressJson, null, 2));
+            
+            if (addressJson.data?.companyLocationAssignAddress?.userErrors?.length > 0) {
+              console.error("Company address assignment errors:", addressJson.data.companyLocationAssignAddress.userErrors);
+            } else {
+              console.log("Company shipping address assigned successfully:", addressJson.data?.companyLocationAssignAddress?.addresses);
+            }
+
+            // Set TAX ID if provided in the form
+            const taxId = formData.get("taxId");
+            if (taxId && taxId.trim()) {
+              console.log("Setting TAX ID for company location:", { locationId, taxId: taxId.trim() });
+
+              try {
+                const taxUpdateResponse = await admin.graphql(
+                  `#graphql
+                    mutation SetCompanyLocationTaxId(
+                      $companyLocationId: ID!,
+                      $taxRegistrationId: String
+                    ) {
+                      companyLocationTaxSettingsUpdate(
+                        companyLocationId: $companyLocationId
+                        taxRegistrationId: $taxRegistrationId
+                      ) {
+                        companyLocation {
+                          id
+                          taxSettings {
+                            taxRegistrationId
+                            taxExempt
+                          }
+                        }
+                        userErrors { field message code }
+                      }
+                    }`,
+                  {
+                    variables: {
+                      companyLocationId: locationId,
+                      taxRegistrationId: taxId.trim(),
+                    },
+                  }
+                );
+
+                const taxUpdateJson = await taxUpdateResponse.json();
+                console.log("TAX ID update response:", JSON.stringify(taxUpdateJson, null, 2));
+
+                if (taxUpdateJson.errors) {
+                  // Check if the mutation doesn't exist (not a Plus store or API limitation)
+                  const mutationNotFound = taxUpdateJson.errors.some(error => 
+                    error.message.includes("companyLocationTaxSettingsUpdate") && 
+                    error.message.includes("doesn't exist on type 'Mutation'")
+                  );
+                  
+                  if (mutationNotFound) {
+                    console.warn("TAX ID setting not available: Store may not be Shopify Plus or B2B feature not enabled. Tax ID collected but not set in Shopify.");
+                    console.log("Tax ID from form (stored for reference):", taxId.trim());
+                  } else {
+                    console.error("TAX ID GraphQL errors:", taxUpdateJson.errors);
+                  }
+                } else {
+                  const errs = taxUpdateJson.data?.companyLocationTaxSettingsUpdate?.userErrors;
+                  if (errs?.length) {
+                    console.error("TAX ID update errors:", errs);
+                  } else {
+                    const updated = taxUpdateJson.data?.companyLocationTaxSettingsUpdate?.companyLocation;
+                    console.log("TAX ID set successfully:", updated?.taxSettings?.taxRegistrationId || "(updated)");
+                  }
+                }
+              } catch (taxError) {
+                console.error("Error setting TAX ID:", taxError);
+                console.log("Tax ID from form (collected but not set):", taxId.trim());
+              }
+            } else {
+              console.log("No TAX ID provided, skipping tax settings update");
+            }
+          } else {
+            console.error("No company location found for company:", companyId);
+          }
+        } catch (addressError) {
+          console.error("Error assigning company address:", addressError);
+        }
+      } else {
+        console.log("No address1 provided, skipping address creation");
+      }
+    }
+
     // 2. Handle customer creation or use existing customer
     let customerId = null;
     let customerError = null;
@@ -269,8 +511,16 @@ export const action = async ({ request }) => {
         firstName: formData.get("firstName"),
         lastName: formData.get("lastName"),
         email: formData.get("userEmail"),
-        phone: formData.get("phone"),
       };
+      
+      // Only add phone if it has a value
+      const newCustomerPhone = formData.get("phone");
+      if (newCustomerPhone && newCustomerPhone.trim()) {
+        customerInput.phone = newCustomerPhone.trim();
+        console.log("Adding phone to new customer:", newCustomerPhone.trim());
+      } else {
+        console.log("Phone is empty, not including in new customer creation");
+      }
 
       console.log("Creating new customer with input:", customerInput);
       const customerResponse = await admin.graphql(
@@ -282,6 +532,7 @@ export const action = async ({ request }) => {
                 email
                 firstName
                 lastName
+                phone
               }
               userErrors {
                 field
@@ -300,7 +551,178 @@ export const action = async ({ request }) => {
         customerError = "GraphQL errors in customer creation";
       } else if (customerJson.data?.customerCreate?.userErrors?.length > 0) {
         console.error("Customer creation errors:", customerJson.data.customerCreate.userErrors);
-        customerError = customerJson.data.customerCreate.userErrors[0].message;
+        const errorMessage = customerJson.data.customerCreate.userErrors[0].message;
+        
+        // If email already exists, try to find and update the existing customer
+        if (errorMessage.includes("Email has already been taken")) {
+          console.log("Email conflict detected, searching for existing customer with broader query");
+          
+          // Try multiple search strategies to find the existing customer
+          console.log("Trying multiple search strategies for email:", userEmail);
+          
+          // Strategy 1: Search by exact email
+          const fallbackSearchResponse1 = await admin.graphql(
+            `#graphql
+              query SearchCustomerByEmail($email: String!) {
+                customers(first: 10, query: $email) {
+                  edges {
+                    node {
+                      id
+                      email
+                      firstName
+                      lastName
+                      phone
+                    }
+                  }
+                }
+              }`,
+            { variables: { email: userEmail.trim() } }
+          );
+          
+          let fallbackSearchJson = await fallbackSearchResponse1.json();
+          console.log("Strategy 1 - Direct email search:", fallbackSearchJson);
+          
+          // Strategy 2: Search with email: prefix
+          if (!fallbackSearchJson.data?.customers?.edges?.length) {
+            console.log("Strategy 1 failed, trying email: prefix search");
+            const fallbackSearchResponse2 = await admin.graphql(
+              `#graphql
+                query SearchCustomerByEmailPrefix($query: String!) {
+                  customers(first: 10, query: $query) {
+                    edges {
+                      node {
+                        id
+                        email
+                        firstName
+                        lastName
+                        phone
+                      }
+                    }
+                  }
+                }`,
+              { variables: { query: `email:${userEmail.trim()}` } }
+            );
+            
+            fallbackSearchJson = await fallbackSearchResponse2.json();
+            console.log("Strategy 2 - Email prefix search:", fallbackSearchJson);
+          }
+          
+          // Strategy 3: Get all customers and filter (last resort)
+          if (!fallbackSearchJson.data?.customers?.edges?.length) {
+            console.log("Strategy 2 failed, trying to get all recent customers");
+            const fallbackSearchResponse3 = await admin.graphql(
+              `#graphql
+                query GetAllRecentCustomers {
+                  customers(first: 50, sortKey: CREATED_AT, reverse: true) {
+                    edges {
+                      node {
+                        id
+                        email
+                        firstName
+                        lastName
+                        phone
+                        createdAt
+                      }
+                    }
+                  }
+                }`
+            );
+            
+            const allCustomersJson = await fallbackSearchResponse3.json();
+            console.log("Strategy 3 - All recent customers count:", allCustomersJson.data?.customers?.edges?.length || 0);
+            
+            // Filter for our email
+            const matchingCustomers = allCustomersJson.data?.customers?.edges?.filter(
+              edge => edge.node.email.toLowerCase() === userEmail.toLowerCase().trim()
+            ) || [];
+            
+            console.log("Found matching customers:", matchingCustomers.length);
+            
+            if (matchingCustomers.length > 0) {
+              fallbackSearchJson = {
+                data: {
+                  customers: {
+                    edges: matchingCustomers
+                  }
+                }
+              };
+              console.log("Strategy 3 - Found customer via all customers filter:", matchingCustomers[0].node);
+            }
+          }
+          
+          console.log("Final fallback search response:", fallbackSearchJson);
+          
+          // Look for exact email match in results
+          const foundCustomer = fallbackSearchJson.data?.customers?.edges?.find(
+            edge => edge.node.email.toLowerCase() === userEmail.toLowerCase().trim()
+          )?.node;
+          
+          if (foundCustomer) {
+            console.log("Found existing customer via fallback search:", foundCustomer);
+            
+            // Update the existing customer with new data including phone
+            const formFirstName = formData.get("firstName");
+            const formLastName = formData.get("lastName");
+            const formPhone = formData.get("phone");
+            
+            console.log("Updating found customer with form data:", { firstName: formFirstName, lastName: formLastName, phone: formPhone });
+            
+            // Prepare fallback customer input - only include phone if it has a value
+            const fallbackCustomerInput = {
+              id: foundCustomer.id,
+              firstName: formFirstName,
+              lastName: formLastName
+            };
+            
+            // Only add phone if it's not empty
+            if (formPhone && formPhone.trim()) {
+              fallbackCustomerInput.phone = formPhone.trim();
+              console.log("Adding phone to fallback customer update:", formPhone.trim());
+            } else {
+              console.log("Phone is empty, not including in fallback update");
+            }
+            
+            const customerUpdateResponse = await admin.graphql(
+              `#graphql
+                mutation UpdateCustomer($input: CustomerInput!) {
+                  customerUpdate(input: $input) {
+                    customer {
+                      id
+                      email
+                      firstName
+                      lastName
+                      phone
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
+                }`,
+              {
+                variables: {
+                  input: fallbackCustomerInput
+                }
+              }
+            );
+            
+            const customerUpdateJson = await customerUpdateResponse.json();
+            console.log("Fallback customer update response:", customerUpdateJson);
+            
+            if (customerUpdateJson.data?.customerUpdate?.userErrors?.length > 0) {
+              console.error("Fallback customer update errors:", customerUpdateJson.data.customerUpdate.userErrors);
+              customerError = customerUpdateJson.data.customerUpdate.userErrors[0].message;
+            } else {
+              customerId = foundCustomer.id;
+              console.log("Successfully updated existing customer via fallback:", customerId);
+              customerError = null; // Clear the error since we successfully updated
+            }
+          } else {
+            customerError = errorMessage;
+          }
+        } else {
+          customerError = errorMessage;
+        }
       } else {
         customerId = customerJson.data?.customerCreate?.customer?.id;
         console.log("Created new customer ID:", customerId);
