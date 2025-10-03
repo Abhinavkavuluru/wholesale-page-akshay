@@ -36,6 +36,7 @@ export default function Index() {
     // Navigate to wholesale page to trigger its loader (page creation)
     // This ensures the page gets created when the app is installed/accessed
     fetcher.load("/app/wholesalepage");
+    fetcher.load("/app/metafielddefinition");
   }, []);
 
   return (

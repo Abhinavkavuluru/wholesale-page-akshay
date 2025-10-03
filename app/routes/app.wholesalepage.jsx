@@ -887,6 +887,7 @@ export const action = async ({ request }) => {
     lastName: formData.get("lastName"),
     email: formData.get("userEmail"),
     phone: formData.get("phone"),
+    tags: ["wholesale"],
   };
 
   const customerResponse = await admin.graphql(
@@ -896,6 +897,7 @@ export const action = async ({ request }) => {
           customer {
             id
             email
+            tags
           }
           userErrors {
             field

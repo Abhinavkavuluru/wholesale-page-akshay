@@ -143,6 +143,7 @@ export const action = async ({ request }) => {
                 firstName
                 lastName
                 phone
+                tags
               }
             }
           }
@@ -172,6 +173,14 @@ export const action = async ({ request }) => {
         lastName: formLastName
       };
       
+      // Preserve existing tags and ensure 'wholesale' is included
+      const existingTags = existingCustomer.tags || [];
+      const wholesaleTag = "wholesale";
+      if (!existingTags.includes(wholesaleTag)) {
+        existingTags.push(wholesaleTag);
+      }
+      customerInput.tags = existingTags;
+      
       // Only add phone if it's not empty
       if (formPhone && formPhone.trim()) {
         customerInput.phone = formPhone.trim();
@@ -179,6 +188,8 @@ export const action = async ({ request }) => {
       } else {
         console.log("Phone is empty, not including in update");
       }
+      
+      console.log("Customer tags being set:", customerInput.tags);
       
       const customerUpdateResponse = await admin.graphql(
         `#graphql
@@ -190,6 +201,7 @@ export const action = async ({ request }) => {
                 firstName
                 lastName
                 phone
+                tags
               }
               userErrors {
                 field
@@ -216,67 +228,197 @@ export const action = async ({ request }) => {
       console.log("Customer with this email does not exist, proceeding with creation");
     }
 
-    // 1. Create company (different approach for existing vs new customers)
-    let companyInput;
-    
-    if (existingCustomer) {
-      // For existing customers, create company without companyContact to avoid email conflict
-      companyInput = {
-        company: {
-          name: formData.get("companyName"),
-          externalId: `ext-${Date.now()}`,
-          note: `Created from Wholesale Registration form`,
+    // 1. Check if company with this email already exists in metafield
+    const companyEmail = formData.get("companyEmail");
+    console.log("Checking if company exists with email:", companyEmail);
+
+    let existingCompany = null;
+    if (companyEmail && companyEmail.trim()) {
+      const companyCheckResponse = await admin.graphql(
+        `#graphql
+          query GetCompaniesByEmailMetafield {
+            companies(first: 50) {
+              edges {
+                node {
+                  id
+                  name
+                  metafields(first: 10) {
+                    edges {
+                      node {
+                        id
+                        namespace
+                        key
+                        value
+                        type
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }`
+      );
+
+      const companyCheckJson = await companyCheckResponse.json();
+      console.log("Company check response:", companyCheckJson);
+      
+      // Find company with matching email metafield
+      const companies = companyCheckJson.data?.companies?.edges || [];
+      for (const companyEdge of companies) {
+        const company = companyEdge.node;
+        const emailMetafield = company.metafields?.edges?.find(
+          metafieldEdge => metafieldEdge.node.namespace === "custom" &&
+                          metafieldEdge.node.key === "companyEmail" && 
+                          metafieldEdge.node.value.toLowerCase() === companyEmail.toLowerCase().trim()
+        );
+        
+        if (emailMetafield) {
+          existingCompany = company;
+          console.log("Found existing company with email metafield:", existingCompany);
+          console.log("Matching metafield:", emailMetafield);
+          break;
         }
-      };
-      console.log("Creating company without contact (existing customer) with input:", companyInput);
+      }
+      
+      console.log("Total companies checked:", companies.length);
+      console.log("Looking for company email:", companyEmail.toLowerCase().trim());
+      
+      if (!existingCompany) {
+        console.log("No existing company found with this email, proceeding with creation");
+      }
     } else {
-      // For new customers, create company with companyContact
-      companyInput = {
-        company: {
-          name: formData.get("companyName"),
-          externalId: `ext-${Date.now()}`,
-          note: `Created from Wholesale Registration form`,
-        },
-        companyContact: {
-          email: formData.get("userEmail"),
-          firstName: formData.get("firstName"),
-          lastName: formData.get("lastName"),
-        }
-      };
-      console.log("Creating company with contact (new customer) with input:", companyInput);
+      console.log("No company email provided, proceeding with creation");
     }
-    const companyResponse = await admin.graphql(
-      `#graphql
-        mutation CreateCompany($input: CompanyCreateInput!) {
-          companyCreate(input: $input) {
-            company {
-              id
-              name
-            }
-            userErrors {
-              field
-              message
-            }
+
+    // 2. Create or use existing company
+    let companyId;
+    
+    if (existingCompany) {
+      // Use existing company
+      companyId = existingCompany.id;
+      console.log("Using existing company ID:", companyId);
+      console.log("Existing company details:", existingCompany);
+    } else {
+      // Create new company (different approach for existing vs new customers)
+      let companyInput;
+      
+      if (existingCustomer) {
+        // For existing customers, create company without companyContact to avoid email conflict
+        companyInput = {
+          company: {
+            name: formData.get("companyName"),
+            externalId: `ext-${Date.now()}`,
+            note: `Created from Wholesale Registration form`,
           }
-        }`,
-      { variables: { input: companyInput } }
-    );
-    
-    const companyJson = await companyResponse.json();
-    console.log("Company creation response:", JSON.stringify(companyJson, null, 2));
-    
-    if (companyJson.errors) {
-      console.error("GraphQL errors in company creation:", companyJson.errors);
-      return json({ error: "GraphQL errors in company creation", details: companyJson.errors }, { status: 400 });
+        };
+        console.log("Creating company without contact (existing customer) with input:", companyInput);
+      } else {
+        // For new customers, create company with companyContact
+        companyInput = {
+          company: {
+            name: formData.get("companyName"),
+            externalId: `ext-${Date.now()}`,
+            note: `Created from Wholesale Registration form`,
+          },
+          companyContact: {
+            email: formData.get("userEmail"),
+            firstName: formData.get("firstName"),
+            lastName: formData.get("lastName"),
+          }
+        };
+        console.log("Creating company with contact (new customer) with input:", companyInput);
+      }
+      
+      const companyResponse = await admin.graphql(
+        `#graphql
+          mutation CreateCompany($input: CompanyCreateInput!) {
+            companyCreate(input: $input) {
+              company {
+                id
+                name
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }`,
+        { variables: { input: companyInput } }
+      );
+      
+      const companyJson = await companyResponse.json();
+      console.log("Company creation response:", JSON.stringify(companyJson, null, 2));
+      
+      if (companyJson.errors) {
+        console.error("GraphQL errors in company creation:", companyJson.errors);
+        return json({ error: "GraphQL errors in company creation", details: companyJson.errors }, { status: 400 });
+      }
+      
+      if (companyJson.data?.companyCreate?.userErrors?.length > 0) {
+        console.error("Company creation errors:", companyJson.data.companyCreate.userErrors);
+        return json({ error: "Failed to create company", details: companyJson.data.companyCreate.userErrors }, { status: 400 });
+      }
+      
+      companyId = companyJson.data?.companyCreate?.company?.id;
+      console.log("Created new company ID:", companyId);
     }
-    
-    if (companyJson.data?.companyCreate?.userErrors?.length > 0) {
-      console.error("Company creation errors:", companyJson.data.companyCreate.userErrors);
-      return json({ error: "Failed to create company", details: companyJson.data.companyCreate.userErrors }, { status: 400 });
+
+    // Set company email metafield only for newly created companies
+    if (companyId && !existingCompany) {
+      const companyEmail = formData.get("companyEmail");
+      if (companyEmail && companyEmail.trim()) {
+        console.log("Setting company email metafield for new company:", companyEmail.trim());
+        
+        try {
+          const metafieldResponse = await admin.graphql(
+            `#graphql
+              mutation SetCompanyEmailMetafield($metafields: [MetafieldsSetInput!]!) {
+                metafieldsSet(metafields: $metafields) {
+                  metafields {
+                    id
+                    key
+                    namespace
+                    value
+                    type
+                  }
+                  userErrors {
+                    field
+                    message
+                  }
+                }
+              }`,
+            {
+              variables: {
+                metafields: [
+                  {
+                    ownerId: companyId,
+                    namespace: "custom",
+                    key: "companyEmail",
+                    value: companyEmail.trim(),
+                    type: "single_line_text_field",
+                  },
+                ],
+              },
+            }
+          );
+          
+          const metafieldJson = await metafieldResponse.json();
+          console.log("Company email metafield response:", JSON.stringify(metafieldJson, null, 2));
+          
+          if (metafieldJson.data?.metafieldsSet?.userErrors?.length > 0) {
+            console.error("Company email metafield errors:", metafieldJson.data.metafieldsSet.userErrors);
+          } else {
+            console.log("Company email metafield set successfully:", metafieldJson.data?.metafieldsSet?.metafields?.[0]);
+          }
+        } catch (metafieldError) {
+          console.error("Error setting company email metafield:", metafieldError);
+        }
+      } else {
+        console.log("No company email provided, skipping metafield creation");
+      }
+    } else if (existingCompany) {
+      console.log("Using existing company, skipping metafield creation (already exists)");
     }
-    
-    const companyId = companyJson.data?.companyCreate?.company?.id;
-    console.log("Created company ID:", companyId);
 
     // 1.5. Add shipping address to the company if companyId exists
     if (companyId) {
@@ -511,6 +653,7 @@ export const action = async ({ request }) => {
         firstName: formData.get("firstName"),
         lastName: formData.get("lastName"),
         email: formData.get("userEmail"),
+        tags: ["wholesale"],
       };
       
       // Only add phone if it has a value
@@ -533,6 +676,7 @@ export const action = async ({ request }) => {
                 firstName
                 lastName
                 phone
+                tags
               }
               userErrors {
                 field
@@ -572,6 +716,7 @@ export const action = async ({ request }) => {
                       firstName
                       lastName
                       phone
+                      tags
                     }
                   }
                 }
@@ -596,6 +741,7 @@ export const action = async ({ request }) => {
                         firstName
                         lastName
                         phone
+                        tags
                       }
                     }
                   }
@@ -621,6 +767,7 @@ export const action = async ({ request }) => {
                         firstName
                         lastName
                         phone
+                        tags
                         createdAt
                       }
                     }
@@ -674,6 +821,14 @@ export const action = async ({ request }) => {
               lastName: formLastName
             };
             
+            // Preserve existing tags and ensure 'wholesale' is included
+            const existingTags = foundCustomer.tags || [];
+            const wholesaleTag = "wholesale";
+            if (!existingTags.includes(wholesaleTag)) {
+              existingTags.push(wholesaleTag);
+            }
+            fallbackCustomerInput.tags = existingTags;
+            
             // Only add phone if it's not empty
             if (formPhone && formPhone.trim()) {
               fallbackCustomerInput.phone = formPhone.trim();
@@ -681,6 +836,8 @@ export const action = async ({ request }) => {
             } else {
               console.log("Phone is empty, not including in fallback update");
             }
+            
+            console.log("Fallback customer tags being set:", fallbackCustomerInput.tags);
             
             const customerUpdateResponse = await admin.graphql(
               `#graphql
@@ -692,6 +849,7 @@ export const action = async ({ request }) => {
                       firstName
                       lastName
                       phone
+                      tags
                     }
                     userErrors {
                       field
@@ -774,14 +932,213 @@ export const action = async ({ request }) => {
 
           const assignMainJson = await assignMainResp.json();
           console.log("Assign main contact response:", JSON.stringify(assignMainJson, null, 2));
+          
+          // Company ordering approval happens automatically when roles are successfully assigned
+          
+          // After assigning main contact, assign location permissions for existing customer
+          if (companyContactId) {
+            console.log("Assigning location permissions for existing customer after main contact assignment:", companyId);
+            
+            try {
+              // Get company location with existing role assignments to find a valid role ID
+              const locationWithRolesResp = await admin.graphql(
+                `#graphql
+                  query GetLocationRoles($companyId: ID!) {
+                    company(id: $companyId) {
+                      locations(first: 1) {
+                        edges {
+                          node {
+                            id
+                            name
+                            roleAssignments(first: 5) {
+                              edges {
+                                node {
+                                  role {
+                                    id
+                                    name
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }`,
+                { variables: { companyId } }
+              );
+
+              const locationData = await locationWithRolesResp.json();
+              console.log("Company location with roles response:", JSON.stringify(locationData, null, 2));
+              
+              const location = locationData.data?.company?.locations?.edges?.[0]?.node;
+              
+              if (location) {
+                console.log("Found company location:", { id: location.id, name: location.name });
+                
+                // Check if there are existing role assignments to use as a reference
+                const existingRoles = location.roleAssignments?.edges || [];
+                console.log("Existing role assignments:", existingRoles);
+                
+                // First fetch available company roles to get valid role IDs
+                console.log("Fetching company roles to assign buyer permissions...");
+                
+                const getRolesResp = await admin.graphql(
+                  `#graphql
+                    query GetCompanyRoles($companyId: ID!) {
+                      company(id: $companyId) {
+                        defaultRole { 
+                          id 
+                          name 
+                        }
+                        contactRoles(first: 25) {
+                          nodes { 
+                            id 
+                            name 
+                          }
+                        }
+                      }
+                    }`,
+                  { variables: { companyId } }
+                );
+                
+                const rolesData = await getRolesResp.json();
+                console.log("Company roles response:", JSON.stringify(rolesData, null, 2));
+                
+                // Choose the best role ID for ordering permissions
+                let roleIdToAssign;
+                let roleName;
+                
+                if (rolesData.data?.company?.defaultRole) {
+                  // Use default role if available (usually "Buyer")
+                  roleIdToAssign = rolesData.data.company.defaultRole.id;
+                  roleName = rolesData.data.company.defaultRole.name;
+                  console.log("Using default role:", { id: roleIdToAssign, name: roleName });
+                } else if (rolesData.data?.company?.contactRoles?.nodes?.length > 0) {
+                  // Find a buyer role, then admin role as fallback
+                  const roles = rolesData.data.company.contactRoles.nodes;
+                  
+                  let buyerRole = roles.find(role => role.name.toLowerCase().includes('buyer'));
+                  let adminRole = roles.find(role => role.name.toLowerCase().includes('admin'));
+                  
+                  if (buyerRole) {
+                    roleIdToAssign = buyerRole.id;
+                    roleName = buyerRole.name;
+                    console.log("Using buyer role:", { id: roleIdToAssign, name: roleName });
+                  } else if (adminRole) {
+                    roleIdToAssign = adminRole.id;
+                    roleName = adminRole.name;
+                    console.log("Using admin role as fallback:", { id: roleIdToAssign, name: roleName });
+                  } else {
+                    // Use first available role
+                    roleIdToAssign = roles[0].id;
+                    roleName = roles[0].name;
+                    console.log("Using first available role:", { id: roleIdToAssign, name: roleName });
+                  }
+                }
+                
+                if (roleIdToAssign) {
+                  console.log("Assigning role to company contact:", { 
+                    companyContactId, 
+                    locationId: location.id,
+                    roleId: roleIdToAssign,
+                    roleName
+                  });
+                  
+                  // Now assign the role using proper role ID
+                  const assignRoleResp = await admin.graphql(
+                    `#graphql
+                      mutation AssignRole($contactId: ID!, $roleId: ID!, $locationId: ID!) {
+                        companyContactAssignRoles(
+                          companyContactId: $contactId,
+                          rolesToAssign: [{
+                            companyContactRoleId: $roleId,
+                            companyLocationId: $locationId
+                          }]
+                        ) {
+                          roleAssignments {
+                            id
+                            role { 
+                              id 
+                              name 
+                            }
+                            companyLocation { 
+                              id 
+                              name 
+                            }
+                          }
+                          userErrors { 
+                            field 
+                            message 
+                            code
+                          }
+                        }
+                      }`,
+                    { 
+                      variables: { 
+                        contactId: companyContactId,
+                        roleId: roleIdToAssign,
+                        locationId: location.id
+                      }
+                    }
+                  );
+                  
+                  const roleResult = await assignRoleResp.json();
+                  console.log("Role assignment result:", JSON.stringify(roleResult, null, 2));
+                  
+                  if (roleResult.data?.companyContactAssignRoles?.userErrors?.length === 0 && 
+                      roleResult.data?.companyContactAssignRoles?.roleAssignments?.length > 0) {
+                    console.log(`🎉 Successfully assigned ${roleName} role! Company should now be approved for ordering.`);
+                  } else {
+                    console.error("Role assignment failed:", roleResult.data?.companyContactAssignRoles?.userErrors);
+                  }
+                } else {
+                  console.error("No valid role found to assign");
+                }
+              } else {
+                console.error("No company location found for role assignment");
+              }
+            } catch (permissionError) {
+              console.error("Error assigning location permissions:", permissionError);
+            }
+          }
         } else {
           console.error(
             "Failed to assign customer as contact:",
             assignCustomerAsContactJson.data?.companyAssignCustomerAsContact?.userErrors
           );
         }
+      } else if (existingCompany) {
+        // 3b. For new customers with existing company, we need to assign them manually
+        console.log("Assigning new customer to existing company:", { companyId, customerId });
+
+        const assignNewCustomerResp = await admin.graphql(
+          `#graphql
+            mutation AssignNewCustomerAsContact($companyId: ID!, $customerId: ID!) {
+              companyAssignCustomerAsContact(companyId: $companyId, customerId: $customerId) {
+                companyContact {
+                  id
+                }
+                userErrors {
+                  field
+                  message
+                  code
+                }
+              }
+            }`,
+          { variables: { companyId, customerId } }
+        );
+
+        const assignNewCustomerJson = await assignNewCustomerResp.json();
+        console.log("Assign new customer to existing company response:", JSON.stringify(assignNewCustomerJson, null, 2));
+
+        if (assignNewCustomerJson.data?.companyAssignCustomerAsContact?.userErrors?.length > 0) {
+          console.error("Failed to assign new customer to existing company:", assignNewCustomerJson.data.companyAssignCustomerAsContact.userErrors);
+        } else {
+          console.log("New customer successfully assigned to existing company");
+        }
       } else {
-        // 3. For new customers created with company, they should already be assigned
+        // 3c. For new customers created with new company, they should already be assigned via companyCreate
         console.log("New customer should already be assigned to company via companyCreate");
       }
     } else {

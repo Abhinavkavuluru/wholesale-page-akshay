@@ -2,7 +2,7 @@
 
 client_id = "e80d8a43e7d5068744e0f0fe41ed9dc0"
 name = "Quick + Wholesale "
-application_url = "https://memorabilia-crop-harbour-planes.trycloudflare.com"
+application_url = "https://forestry-aims-love-aluminium.trycloudflare.com"
 embedded = true
 
 [build]
@@ -16,9 +16,9 @@ api_version = "2025-10"
 scopes = "read_companies,read_customers,read_orders,read_products,read_script_tags,read_themes,unauthenticated_read_product_listings,write_companies,write_content,write_customers,write_discounts,write_online_store_navigation,write_orders,write_products,write_script_tags,write_themes"
 
 [auth]
-redirect_urls = [ "https://memorabilia-crop-harbour-planes.trycloudflare.com/api/auth" ]
+redirect_urls = [ "https://forestry-aims-love-aluminium.trycloudflare.com/api/auth" ]
 
 [app_proxy]
-url = "https://memorabilia-crop-harbour-planes.trycloudflare.com/apps/proxy"
+url = "https://forestry-aims-love-aluminium.trycloudflare.com/apps/proxy"
 subpath = "proxy"
 prefix = "apps"
